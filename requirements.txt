@@ -1,0 +1,6 @@
+setuptools==50.3.2
+pybullet==3.0.9
+gym==0.17.3
+numpy==1.23.5
+numba
+numpy-quaternion==2020.11.2.17.0.49

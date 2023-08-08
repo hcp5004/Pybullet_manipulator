@@ -1,0 +1,12 @@
+Metadata-Version: 1.1
+Name: pybullet-multigoal-gym
+Version: 1.0.0
+Summary: A migration of the OpenAI Gym multi-goal robotic environment based on pybullet
+Home-page: #
+Author: XintongYang
+Author-email: YangX66@cardiff.ac.uk
+License: UNKNOWN
+Description: UNKNOWN
+Platform: UNKNOWN
+Classifier: Programming Language :: Python :: 3
+Classifier: Operating System :: OS Independent
