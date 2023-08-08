@@ -66,25 +66,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 """
-We use [OpenAIGym](http://gym.openai.com/docs) to create the environment.
-We will use the `upper_bound` parameter to scale our actions later.
-"""
-
-problem = "Pendulum-v1"
-env = gym.make(problem)
-
-num_states = env.observation_space.shape[0]
-print("Size of State Space ->  {}".format(num_states))
-num_actions = env.action_space.shape[0]
-print("Size of Action Space ->  {}".format(num_actions))
-
-upper_bound = env.action_space.high[0]
-lower_bound = env.action_space.low[0]
-
-print("Max Value of Action ->  {}".format(upper_bound))
-print("Min Value of Action ->  {}".format(lower_bound))
-
-"""
 To implement better exploration by the Actor network, we use noisy perturbations,
 specifically
 an **Ornstein-Uhlenbeck process** for generating noise, as described in the paper.
@@ -143,7 +124,7 @@ the maximum predicted value as seen by the Critic, for a given state.
 
 
 class Buffer:
-    def __init__(self, buffer_capacity=100000, batch_size=64):
+    def __init__(self, num_states, num_actions, buffer_capacity=100000, batch_size=64):
         # Number of "experiences" to store at max
         self.buffer_capacity = buffer_capacity
         # Num of tuples to train on.
