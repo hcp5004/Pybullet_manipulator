@@ -163,6 +163,9 @@ class Buffer:
         action_batch,
         reward_batch,
         next_state_batch,
+        ep,
+        done,
+        save
     ):
         # Training and updating Actor & Critic networks.
         # See Pseudo Code.
@@ -173,6 +176,9 @@ class Buffer:
             )
             critic_value = self.agent.critic_model([state_batch, action_batch], training=True)
             critic_loss = tf.math.reduce_mean(tf.math.square(y - critic_value))
+            if done and save:
+                with self.agent.summary_writer.as_default():
+                    tf.summary.scalar('critic_loss', critic_loss, step=ep)
 
         critic_grad = tape.gradient(critic_loss, self.agent.critic_model.trainable_variables)
         self.agent.critic_optimizer.apply_gradients(
@@ -181,10 +187,13 @@ class Buffer:
 
         with tf.GradientTape() as tape:
             actions = self.agent.actor_model(state_batch, training=True)
-            critic_value = self.agentcritic_model([state_batch, actions], training=True)
+            critic_value = self.agent.critic_model([state_batch, actions], training=True)
             # Used `-value` as we want to maximize the value given
             # by the critic for our actions
             actor_loss = -tf.math.reduce_mean(critic_value)
+            if done and save:
+                with self.agent.summary_writer.as_default():
+                    tf.summary.scalar('actor_loss', actor_loss, step=ep)
 
         actor_grad = tape.gradient(actor_loss, self.agent.actor_model.trainable_variables)
         self.agent.actor_optimizer.apply_gradients(
@@ -192,7 +201,7 @@ class Buffer:
         )
 
     # We compute the loss and update parameters
-    def learn(self):
+    def learn(self, ep, done, save=False):
         # Get sampling range
         record_range = min(self.buffer_counter, self.buffer_capacity)
         # Randomly sample indices
@@ -205,10 +214,16 @@ class Buffer:
         reward_batch = tf.cast(reward_batch, dtype=tf.float32)
         next_state_batch = tf.convert_to_tensor(self.next_state_buffer[batch_indices])
 
-        self.update(state_batch, action_batch, reward_batch, next_state_batch)
+        self.update(state_batch, action_batch, reward_batch, next_state_batch, ep, done, save)
+
+
+
 
 class Agent:
     def __init__(self, env):
+        self.log_dir = "logs/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        self.summary_writer = tf.summary.create_file_writer(self.log_dir)
+
         self.env = env
 
         self.num_states = env.observation_space.shape[0] #dimension
@@ -233,8 +248,8 @@ class Agent:
         self.target_critic.set_weights(self.critic_model.get_weights())
 
         # Learning rate for actor-critic models
-        self.critic_lr = 0.001
-        self.actor_lr = 0.0001
+        self.critic_lr = 0.002
+        self.actor_lr = 0.001
 
         self.critic_optimizer = tf.keras.optimizers.Adam(self.critic_lr)
         self.actor_optimizer = tf.keras.optimizers.Adam(self.actor_lr)
@@ -284,7 +299,7 @@ class Agent:
         inputs = layers.Input(shape=(self.num_states,))
         out = layers.Dense(256, activation="relu")(inputs)
         out = layers.Dense(256, activation="relu")(out)
-        out = layers.Dense(256, activation="relu")(out)
+        #out = layers.Dense(256, activation="relu")(out)
         outputs = layers.Dense(self.num_actions, activation="tanh", kernel_initializer=last_init)(out)
 
         outputs = outputs * self.upper_bound
@@ -309,8 +324,8 @@ class Agent:
 
         out = layers.Dense(256, activation="relu")(concat)
         out = layers.Dense(256, activation="relu")(out)
-        outputs = layers.Dense(1,kernel_initializer=last_init)(out)
-
+        #outputs = layers.Dense(1,kernel_initializer=last_init)(out)
+        outputs = layers.Dense(1)(out)
         # Outputs single value for give state-action
         model = tf.keras.Model([state_input, action_input], outputs)
 
@@ -323,12 +338,13 @@ class Agent:
     """
 
 
-    def policy(self, state, noise_object):
+    def policy(self, state, noise_object, noise = True):
         sampled_actions = tf.squeeze(self.actor_model(state))
         noise = noise_object()
         # Adding noise to action
         sampled_actions = sampled_actions.numpy() + noise
-
+        if not noise:
+            sampled_actions = sampled_actions.numpy()
         # We make sure action is within bounds
         legal_action = np.clip(sampled_actions, self.lower_bound, self.upper_bound)
 
@@ -342,73 +358,95 @@ import numpy as np
 import matplotlib.pyplot as plt
 import datetime
 
-env = gym.make('Pendulum-v0',g=9.81)
-agent = Agent(env)
-# Takes about 4 min to train
-for ep in range(agent.total_episodes):
-    prev_state = env.reset()
-    episodic_reward = 0
+if __name__ == "__main__":
+    env = gym.make('Pendulum-v0',g=9.81)
+    agent = Agent(env)
+    # Takes about 4 min to train
+    for ep in range(agent.total_episodes):
+        prev_state = env.reset()
+        #episodic_reward = 0
 
-    while True:
-        # Uncomment this to see the Actor in action
-        # But not in a python notebook.
-        # env.render()
+        while True:
+            # Uncomment this to see the Actor in action
+            # But not in a python notebook.
+            # env.render()
 
-        tf_prev_state = tf.expand_dims(tf.convert_to_tensor(prev_state), 0)
+            tf_prev_state = tf.expand_dims(tf.convert_to_tensor(prev_state), 0)
 
-        action = agent.policy(tf_prev_state, agent.ou_noise)
-        # Recieve state and reward from environment.
-        state, reward, done, info = env.step(action)
+            action = agent.policy(tf_prev_state, agent.ou_noise)
+            # Recieve state and reward from environment.
+            state, reward, done, info = env.step(action)
 
-        agent.buffer.record((prev_state, action, reward, state))
-        episodic_reward += reward
+            agent.buffer.record((prev_state, action, reward, state))
+            #episodic_reward += reward
 
-        agent.buffer.learn()
-        agent.update_target(agent.target_actor.variables, agent.actor_model.variables, agent.tau)
-        agent.update_target(agent.target_critic.variables, agent.critic_model.variables, agent.tau)
+            agent.buffer.learn(ep, done, save=True)
+            agent.update_target(agent.target_actor.variables, agent.actor_model.variables, agent.tau)
+            agent.update_target(agent.target_critic.variables, agent.critic_model.variables, agent.tau)
 
-        # End this episode when `done` is True
-        if done:
-            break
+            # End this episode when `done` is True
+            if done:
+                break
 
-        prev_state = state
+            prev_state = state
 
-    agent.ep_reward_list.append(episodic_reward)
+        # Test Policy
+        prev_state = env.reset()
+        episodic_reward = 0
 
-    # Mean of last 40 episodes
-    avg_reward = np.mean(agent.ep_reward_list[-40:])
-    print("Episode * {} * Avg Reward is ==> {}".format(ep, avg_reward))
-    agent.avg_reward_list.append(avg_reward)
+        while True:
+            tf_prev_state = tf.expand_dims(tf.convert_to_tensor(prev_state), 0)
+
+            action = agent.policy(tf_prev_state, agent.ou_noise, noise=False)
+            # Recieve state and reward from environment.
+            state, reward, done, info = env.step(action)
+
+            episodic_reward += reward
+
+            # End this episode when `done` is True
+            if done:
+                break
+
+            prev_state = state
+
+        agent.ep_reward_list.append(episodic_reward)
+
+        # Mean of last 40 episodes
+        #avg_reward = np.mean(agent.ep_reward_list[-40:])
+        #print("Episode * {} * Avg Reward is ==> {}".format(ep, avg_reward))
+        with agent.summary_writer.as_default():
+            tf.summary.scalar('mean_reward', episodic_reward, step=ep)
+        # agent.avg_reward_list.append(avg_reward)
 
 
-"""
-If training proceeds correctly, the average episodic reward will increase with time.
+    """
+    If training proceeds correctly, the average episodic reward will increase with time.
 
-Feel free to try different learning rates, `tau` values, and architectures for the
-Actor and Critic networks.
+    Feel free to try different learning rates, `tau` values, and architectures for the
+    Actor and Critic networks.
 
-The Inverted Pendulum problem has low complexity, but DDPG work great on many other
-problems.
+    The Inverted Pendulum problem has low complexity, but DDPG work great on many other
+    problems.
 
-Another great environment to try this on is `LunarLandingContinuous-v2`, but it will take
-more episodes to obtain good results.
-"""
+    Another great environment to try this on is `LunarLandingContinuous-v2`, but it will take
+    more episodes to obtain good results.
+    """
 
-# Save the weights
-#actor_model.save_weights("pendulum_actor.h5")
-#critic_model.save_weights("pendulum_critic.h5")
+    # Save the weights
+    agent.actor_model.save("models/pendulum_actor.h5")
+    agent.critic_model.save("models/pendulum_critic.h5")
 
-#target_actor.save_weights("pendulum_target_actor.h5")
-#target_critic.save_weights("pendulum_target_critic.h5")
+    #agent.target_actor.save_weights("pendulum_target_actor.h5")
+    #agent.target_critic.save_weights("pendulum_target_critic.h5")
 
-"""
-Before Training:
+    """
+    Before Training:
 
-![before_img](https://i.imgur.com/ox6b9rC.gif)
-"""
+    ![before_img](https://i.imgur.com/ox6b9rC.gif)
+    """
 
-"""
-After 100 episodes:
+    """
+    After 100 episodes:
 
-![after_img](https://i.imgur.com/eEH8Cz6.gif)
-"""
+    ![after_img](https://i.imgur.com/eEH8Cz6.gif)
+    """
