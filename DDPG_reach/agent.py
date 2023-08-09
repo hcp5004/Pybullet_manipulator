@@ -123,7 +123,9 @@ the maximum predicted value as seen by the Critic, for a given state.
 """
 
 class Buffer:
-    def __init__(self, agent, buffer_capacity=100000, batch_size=64):
+    def __init__(self, agent, buffer_capacity=100000, batch_size=64, update=True):
+        self.udpate = update
+        
         # Number of "experiences" to store at max
         self.buffer_capacity = buffer_capacity
         # Num of tuples to train on.
@@ -164,8 +166,7 @@ class Buffer:
         reward_batch,
         next_state_batch,
         ep,
-        done,
-        save
+        done
     ):
         # Training and updating Actor & Critic networks.
         # See Pseudo Code.
@@ -176,7 +177,7 @@ class Buffer:
             )
             critic_value = self.agent.critic_model([state_batch, action_batch], training=True)
             critic_loss = tf.math.reduce_mean(tf.math.square(y - critic_value))
-            if done and save:
+            if done and self.update:
                 with self.agent.summary_writer.as_default():
                     tf.summary.scalar('critic_loss', critic_loss, step=ep)
 
@@ -191,7 +192,7 @@ class Buffer:
             # Used `-value` as we want to maximize the value given
             # by the critic for our actions
             actor_loss = -tf.math.reduce_mean(critic_value)
-            if done and save:
+            if done and self.update:
                 with self.agent.summary_writer.as_default():
                     tf.summary.scalar('actor_loss', actor_loss, step=ep)
 
@@ -201,7 +202,7 @@ class Buffer:
         )
 
     # We compute the loss and update parameters
-    def learn(self, ep, done, save=False):
+    def learn(self, ep, done):
         # Get sampling range
         record_range = min(self.buffer_counter, self.buffer_capacity)
         # Randomly sample indices
@@ -214,15 +215,16 @@ class Buffer:
         reward_batch = tf.cast(reward_batch, dtype=tf.float32)
         next_state_batch = tf.convert_to_tensor(self.next_state_buffer[batch_indices])
 
-        self.update(state_batch, action_batch, reward_batch, next_state_batch, ep, done, save)
+        self.update(state_batch, action_batch, reward_batch, next_state_batch, ep, done)
 
 
 
 
 class Agent:
-    def __init__(self, env):
-        self.log_dir = "logs/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-        self.summary_writer = tf.summary.create_file_writer(self.log_dir)
+    def __init__(self, env, update=True):
+        
+        self.update = update
+        self.Init_board()
 
         self.env = env
 
@@ -260,7 +262,7 @@ class Agent:
         # Used to update target networks
         self.tau = 0.005
 
-        self.buffer = Buffer(self, 50000, 64)
+        self.buffer = Buffer(self, 50000, 64, update=self.update)
 
         """
         Now we implement our main training loop, and iterate over episodes.
@@ -272,9 +274,17 @@ class Agent:
         self.ep_reward_list = []
         # To store average reward history of last few episodes
         self.avg_reward_list = []
+    
+    def Init_board(self):
+        if self.update:
+            self.log_dir = "logs/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+            self.summary_writer = tf.summary.create_file_writer(self.log_dir)
+        else:
+            self.log_dir = None
+            self.summary_writer = None
 
-        # This update target parameters slowly
-        # Based on rate `tau`, which is much less than one.
+    # This update target parameters slowly
+    # Based on rate `tau`, which is much less than one.
     @tf.function
     def update_target(self, target_weights, weights, tau):
         for a, b in zip(target_weights, weights):
@@ -324,8 +334,8 @@ class Agent:
 
         out = layers.Dense(256, activation="relu")(concat)
         out = layers.Dense(256, activation="relu")(out)
-        #outputs = layers.Dense(1,kernel_initializer=last_init)(out)
-        outputs = layers.Dense(1)(out)
+        outputs = layers.Dense(1,kernel_initializer=last_init)(out)
+        #outputs = layers.Dense(1)(out)
         # Outputs single value for give state-action
         model = tf.keras.Model([state_input, action_input], outputs)
 
@@ -380,7 +390,7 @@ if __name__ == "__main__":
             agent.buffer.record((prev_state, action, reward, state))
             #episodic_reward += reward
 
-            agent.buffer.learn(ep, done, save=True)
+            agent.buffer.learn(ep, done)
             agent.update_target(agent.target_actor.variables, agent.actor_model.variables, agent.tau)
             agent.update_target(agent.target_critic.variables, agent.critic_model.variables, agent.tau)
 

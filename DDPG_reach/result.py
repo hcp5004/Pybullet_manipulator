@@ -5,9 +5,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 import datetime
 from agent import Agent
+import time
 
 env = gym.make('Pendulum-v0',g=9.81)
-agent = Agent(env)
+agent = Agent(env, update=False)
 agent.actor_model = tf.keras.models.load_model('models/pendulum_actor.h5')
 agent.critic_model = tf.keras.models.load_model('models/pendulum_critic.h5')
 # Takes about 4 min to train
@@ -17,6 +18,7 @@ for ep in range(10):
     episodic_reward = 0
     while True:
         env.render("human")
+        time.sleep(.1)
         tf_prev_state = tf.expand_dims(tf.convert_to_tensor(prev_state), 0)
 
         action = agent.policy(tf_prev_state, agent.ou_noise, noise=False)
