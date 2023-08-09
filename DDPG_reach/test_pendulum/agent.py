@@ -1,10 +1,3 @@
-import gym
-import tensorflow as tf
-from tensorflow.keras import layers
-import numpy as np
-import matplotlib.pyplot as plt
-import datetime
-
 """
 Title: Deep Deterministic Policy Gradient (DDPG)
 Author: [amifunny](https://github.com/amifunny)
@@ -235,11 +228,11 @@ class Agent:
 
         self.env = env
 
-        self.num_states = env.observation_space['policy_state'].shape[0] #dimension
+        self.num_states = env.observation_space.shape[0] #dimension
         self.num_actions = env.action_space.shape[0] #dimension
 
-        self.upper_bound = env.action_space.high
-        self.lower_bound = env.action_space.low
+        self.upper_bound = env.action_space.high[0]
+        self.lower_bound = env.action_space.low[0]
         """
         ## Training hyperparameters
         """
@@ -263,7 +256,7 @@ class Agent:
         self.critic_optimizer = tf.keras.optimizers.Adam(self.critic_lr)
         self.actor_optimizer = tf.keras.optimizers.Adam(self.actor_lr)
 
-        self.total_episodes = 1000
+        self.total_episodes = 100
         # Discount factor for future rewards
         self.gamma = 0.99
         # Used to update target networks
@@ -318,7 +311,7 @@ class Agent:
         out = layers.Dense(256, activation="relu")(out)
         #out = layers.Dense(256, activation="relu")(out)
         outputs = layers.Dense(self.num_actions, activation="tanh", kernel_initializer=last_init)(out)
-        outputs = outputs * tf.expand_dims(tf.convert_to_tensor(self.upper_bound), axis=0)
+        outputs = outputs * self.upper_bound
         model = tf.keras.Model(inputs, outputs)
         return model
 
@@ -364,4 +357,105 @@ class Agent:
         # We make sure action is within bounds
         legal_action = np.clip(sampled_actions, self.lower_bound, self.upper_bound)
 
-        return np.squeeze(legal_action)
+        return [np.squeeze(legal_action)]
+
+
+import gym
+import tensorflow as tf
+from tensorflow.keras import layers
+import numpy as np
+import matplotlib.pyplot as plt
+import datetime
+
+if __name__ == "__main__":
+    env = gym.make('Pendulum-v0',g=9.81)
+    agent = Agent(env)
+    # Takes about 4 min to train
+    for ep in range(agent.total_episodes):
+        prev_state = env.reset()
+        #episodic_reward = 0
+
+        while True:
+            # Uncomment this to see the Actor in action
+            # But not in a python notebook.
+            # env.render()
+
+            tf_prev_state = tf.expand_dims(tf.convert_to_tensor(prev_state), 0)
+
+            action = agent.policy(tf_prev_state, agent.ou_noise)
+            # Recieve state and reward from environment.
+            state, reward, done, info = env.step(action)
+
+            agent.buffer.record((prev_state, action, reward, state))
+            #episodic_reward += reward
+
+            agent.buffer.learn(ep, done)
+            agent.update_target(agent.target_actor.variables, agent.actor_model.variables, agent.tau)
+            agent.update_target(agent.target_critic.variables, agent.critic_model.variables, agent.tau)
+
+            # End this episode when `done` is True
+            if done:
+                break
+
+            prev_state = state
+
+        # Test Policy
+        prev_state = env.reset()
+        episodic_reward = 0
+
+        while True:
+            tf_prev_state = tf.expand_dims(tf.convert_to_tensor(prev_state), 0)
+
+            action = agent.policy(tf_prev_state, agent.ou_noise, noise=False)
+            # Recieve state and reward from environment.
+            state, reward, done, info = env.step(action)
+
+            episodic_reward += reward
+
+            # End this episode when `done` is True
+            if done:
+                break
+
+            prev_state = state
+
+        agent.ep_reward_list.append(episodic_reward)
+
+        # Mean of last 40 episodes
+        #avg_reward = np.mean(agent.ep_reward_list[-40:])
+        #print("Episode * {} * Avg Reward is ==> {}".format(ep, avg_reward))
+        with agent.summary_writer.as_default():
+            tf.summary.scalar('mean_reward', episodic_reward, step=ep)
+        # agent.avg_reward_list.append(avg_reward)
+
+
+    """
+    If training proceeds correctly, the average episodic reward will increase with time.
+
+    Feel free to try different learning rates, `tau` values, and architectures for the
+    Actor and Critic networks.
+
+    The Inverted Pendulum problem has low complexity, but DDPG work great on many other
+    problems.
+
+    Another great environment to try this on is `LunarLandingContinuous-v2`, but it will take
+    more episodes to obtain good results.
+    """
+
+    # Save the weights
+    agent.actor_model.save("models/pendulum_actor.h5")
+    agent.critic_model.save("models/pendulum_critic.h5")
+
+    #agent.target_actor.save_weights("pendulum_target_actor.h5")
+    #agent.target_critic.save_weights("pendulum_target_critic.h5")
+
+    """
+    Before Training:
+
+    ![before_img](https://i.imgur.com/ox6b9rC.gif)
+    """
+
+    """
+    After 100 episodes:
+
+    ![after_img](https://i.imgur.com/eEH8Cz6.gif)
+    """
