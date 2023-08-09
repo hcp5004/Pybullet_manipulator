@@ -240,6 +240,11 @@ class Agent:
 
         self.upper_bound = env.action_space.high
         self.lower_bound = env.action_space.low
+
+        print("num_states: {}".format(self.num_states))
+        print("num_actions: {}".format(self.num_actions))
+        print("upper_bound: {}".format(self.upper_bound))
+        print("lower_bound: {}".format(self.lower_bound))
         """
         ## Training hyperparameters
         """
@@ -248,6 +253,9 @@ class Agent:
 
         self.actor_model = self.get_actor()
         self.critic_model = self.get_critic()
+
+        self.actor_model.summary()
+        self.critic_model.summary()
 
         self.target_actor = self.get_actor()
         self.target_critic = self.get_critic()
@@ -258,18 +266,18 @@ class Agent:
 
         # Learning rate for actor-critic models
         self.critic_lr = 0.001
-        self.actor_lr = 0.0001
+        self.actor_lr = 0.001
 
         self.critic_optimizer = tf.keras.optimizers.Adam(self.critic_lr)
         self.actor_optimizer = tf.keras.optimizers.Adam(self.actor_lr)
 
-        self.total_episodes = 10000
+        self.total_episodes = 100000
         # Discount factor for future rewards
         self.gamma = 0.99
         # Used to update target networks
         self.tau = 0.001
 
-        self.buffer = Buffer(self, 1000000, 64, update=self.update)
+        self.buffer = Buffer(self, 1000000, 256, update=self.update)
 
         self.actor_l2_weight = 0.01
         self.critic_l2_weight = 0.01
@@ -319,7 +327,7 @@ class Agent:
         inputs = layers.Input(shape=(self.num_states,))
         out = layers.Dense(256, activation="relu")(inputs)
         out = layers.Dense(256, activation="relu")(out)
-        #out = layers.Dense(256, activation="relu")(out)
+        out = layers.Dense(256, activation="relu")(out)
         outputs = layers.Dense(self.num_actions, activation="tanh", kernel_initializer=last_init)(out)
         outputs = outputs * tf.expand_dims(tf.convert_to_tensor(self.upper_bound), axis=0)
         model = tf.keras.Model(inputs, outputs)
@@ -330,18 +338,27 @@ class Agent:
         # Initialize weights between -3e-3 and 3-e3
         last_init = tf.random_uniform_initializer(minval=-0.0003, maxval=0.0003)
         # State as input
+        # state_input = layers.Input(shape=(self.num_states))
+        # state_out = layers.Dense(400, activation="relu")(state_input)
+        # state_out = layers.Dense(300, activation="relu")(state_out)
+
+        # # Action as input
+        # action_input = layers.Input(shape=(self.num_actions))
+        # action_out = layers.Dense(32, activation="relu")(action_input)
+
+        # # Both are passed through seperate layer before concatenating
+        # concat = layers.Concatenate()([state_out, action_out])
+
+        # out = layers.Dense(256, activation="relu")(concat)
+        # out = layers.Dense(256, activation="relu")(out)
+        # outputs = layers.Dense(1,kernel_initializer=last_init)(out)
+        # model = tf.keras.Model([state_input, action_input], outputs)
+        
         state_input = layers.Input(shape=(self.num_states))
-        state_out = layers.Dense(16, activation="relu")(state_input)
-        state_out = layers.Dense(32, activation="relu")(state_out)
-
-        # Action as input
         action_input = layers.Input(shape=(self.num_actions))
-        action_out = layers.Dense(32, activation="relu")(action_input)
-
-        # Both are passed through seperate layer before concatenating
-        concat = layers.Concatenate()([state_out, action_out])
-
-        out = layers.Dense(256, activation="relu")(concat)
+        input= layers.Concatenate()([state_input, action_input])
+        out = layers.Dense(256, activation="relu")(input)
+        out = layers.Dense(256, activation="relu")(out)
         out = layers.Dense(256, activation="relu")(out)
         outputs = layers.Dense(1,kernel_initializer=last_init)(out)
         model = tf.keras.Model([state_input, action_input], outputs)
