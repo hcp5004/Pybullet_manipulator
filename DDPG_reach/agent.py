@@ -235,7 +235,7 @@ class Agent:
 
         self.env = env
 
-        self.num_states = env.observation_space['policy_state'].shape[0] #dimension
+        self.num_states = env.observation_space['observation'].shape[0] #dimension
         self.num_actions = env.action_space.shape[0] #dimension
 
         self.upper_bound = env.action_space.high
@@ -257,19 +257,22 @@ class Agent:
         self.target_critic.set_weights(self.critic_model.get_weights())
 
         # Learning rate for actor-critic models
-        self.critic_lr = 0.002
-        self.actor_lr = 0.001
+        self.critic_lr = 0.001
+        self.actor_lr = 0.0001
 
         self.critic_optimizer = tf.keras.optimizers.Adam(self.critic_lr)
         self.actor_optimizer = tf.keras.optimizers.Adam(self.actor_lr)
 
-        self.total_episodes = 1000
+        self.total_episodes = 10000
         # Discount factor for future rewards
         self.gamma = 0.99
         # Used to update target networks
-        self.tau = 0.005
+        self.tau = 0.001
 
-        self.buffer = Buffer(self, 50000, 64, update=self.update)
+        self.buffer = Buffer(self, 1000000, 64, update=self.update)
+
+        self.actor_l2_weight = 0.01
+        self.critic_l2_weight = 0.01
 
         """
         Now we implement our main training loop, and iterate over episodes.
@@ -341,8 +344,6 @@ class Agent:
         out = layers.Dense(256, activation="relu")(concat)
         out = layers.Dense(256, activation="relu")(out)
         outputs = layers.Dense(1,kernel_initializer=last_init)(out)
-        #outputs = layers.Dense(1)(out)
-        # Outputs single value for give state-action
         model = tf.keras.Model([state_input, action_input], outputs)
 
         return model

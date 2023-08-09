@@ -1,4 +1,2 @@
-build/
-pybullet_multigoal_gym.egg-info/
 DDPG_reach/logs/
 DDPG_reach/models/
