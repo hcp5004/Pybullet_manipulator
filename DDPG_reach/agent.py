@@ -184,9 +184,9 @@ class Buffer:
             )
             critic_value = self.agent.critic_model([state_batch, action_batch], training=True)
             critic_loss = tf.math.reduce_mean(tf.math.square(y - critic_value))
-            if done and self.update:
-                with self.agent.summary_writer.as_default():
-                    tf.summary.scalar('critic_loss', critic_loss, step=ep)
+        if done and self.update:
+            with self.agent.summary_writer.as_default():
+                tf.summary.scalar('critic_loss', critic_loss, step=ep)  
 
         critic_grad = tape.gradient(critic_loss, self.agent.critic_model.trainable_variables)
         self.agent.critic_optimizer.apply_gradients(
@@ -199,9 +199,9 @@ class Buffer:
             # Used `-value` as we want to maximize the value given
             # by the critic for our actions
             actor_loss = -tf.math.reduce_mean(critic_value)
-            if done and self.update:
-                with self.agent.summary_writer.as_default():
-                    tf.summary.scalar('actor_loss', actor_loss, step=ep)
+        if done and self.update:
+            with self.agent.summary_writer.as_default():
+                tf.summary.scalar('actor_loss', actor_loss, step=ep)
 
         actor_grad = tape.gradient(actor_loss, self.agent.actor_model.trainable_variables)
         self.agent.actor_optimizer.apply_gradients(
@@ -271,7 +271,7 @@ class Agent:
         self.critic_optimizer = tf.keras.optimizers.Adam(self.critic_lr)
         self.actor_optimizer = tf.keras.optimizers.Adam(self.actor_lr)
 
-        self.total_episodes = 100000
+        self.total_episodes = 20000
         # Discount factor for future rewards
         self.gamma = 0.99
         # Used to update target networks
@@ -325,9 +325,9 @@ class Agent:
         last_init = tf.random_uniform_initializer(minval=-0.003, maxval=0.003)
 
         inputs = layers.Input(shape=(self.num_states,))
-        out = layers.Dense(256, activation="relu")(inputs)
-        out = layers.Dense(256, activation="relu")(out)
-        out = layers.Dense(256, activation="relu")(out)
+        out = layers.Dense(400, activation="relu")(inputs)
+        out = layers.Dense(300, activation="relu")(out)
+        #out = layers.Dense(256, activation="relu")(out)
         outputs = layers.Dense(self.num_actions, activation="tanh", kernel_initializer=last_init)(out)
         outputs = outputs * tf.expand_dims(tf.convert_to_tensor(self.upper_bound), axis=0)
         model = tf.keras.Model(inputs, outputs)
@@ -337,31 +337,31 @@ class Agent:
     def get_critic(self):
         # Initialize weights between -3e-3 and 3-e3
         last_init = tf.random_uniform_initializer(minval=-0.0003, maxval=0.0003)
-        # State as input
-        # state_input = layers.Input(shape=(self.num_states))
-        # state_out = layers.Dense(400, activation="relu")(state_input)
-        # state_out = layers.Dense(300, activation="relu")(state_out)
-
-        # # Action as input
-        # action_input = layers.Input(shape=(self.num_actions))
-        # action_out = layers.Dense(32, activation="relu")(action_input)
-
-        # # Both are passed through seperate layer before concatenating
-        # concat = layers.Concatenate()([state_out, action_out])
-
-        # out = layers.Dense(256, activation="relu")(concat)
-        # out = layers.Dense(256, activation="relu")(out)
-        # outputs = layers.Dense(1,kernel_initializer=last_init)(out)
-        # model = tf.keras.Model([state_input, action_input], outputs)
-        
+        #State as input
         state_input = layers.Input(shape=(self.num_states))
+        state_out = layers.Dense(16, activation="relu")(state_input)
+        state_out = layers.Dense(32, activation="relu")(state_out)
+
+        # Action as input
         action_input = layers.Input(shape=(self.num_actions))
-        input= layers.Concatenate()([state_input, action_input])
-        out = layers.Dense(256, activation="relu")(input)
-        out = layers.Dense(256, activation="relu")(out)
-        out = layers.Dense(256, activation="relu")(out)
+        action_out = layers.Dense(32, activation="relu")(action_input)
+
+        # Both are passed through seperate layer before concatenating
+        concat = layers.Concatenate()([state_out, action_out])
+
+        out = layers.Dense(400, activation="relu")(concat)
+        out = layers.Dense(300, activation="relu")(out)
         outputs = layers.Dense(1,kernel_initializer=last_init)(out)
         model = tf.keras.Model([state_input, action_input], outputs)
+        
+        # state_input = layers.Input(shape=(self.num_states))
+        # action_input = layers.Input(shape=(self.num_actions))
+        # input= layers.Concatenate()([state_input, action_input])
+        # out = layers.Dense(400, activation="relu")(input)
+        # out = layers.Dense(300, activation="relu")(out)
+        # #out = layers.Dense(256, activation="relu")(out)
+        # outputs = layers.Dense(1,kernel_initializer=last_init)(out)
+        # model = tf.keras.Model([state_input, action_input], outputs)
 
         return model
 

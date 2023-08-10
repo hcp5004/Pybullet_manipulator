@@ -411,8 +411,8 @@ more episodes to obtain good results.
 actor_model.save("pendulum_actor.h5")
 critic_model.save("pendulum_critic.h5")
 
-target_actor.save_weights("pendulum_target_actor.h5")
-target_critic.save_weights("pendulum_target_critic.h5")
+#target_actor.save_weights("pendulum_target_actor.h5")
+#target_critic.save_weights("pendulum_target_critic.h5")
 
 """
 Before Training:
