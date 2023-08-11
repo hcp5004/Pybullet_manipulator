@@ -9,13 +9,15 @@ import matplotlib.pyplot as plt
 import datetime
 from agent import Agent
 import time
+import sys, os
+sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
 import panda_gym
 
-env = gym.make('PandaReachJoints-v3')
+env = gym.make('PandaReachJointsDense-v3')
 agent = Agent(env)
 
 for ep in range(agent.total_episodes):
-    agent.update=True
+    agent.write=True
     prev_state, info = env.reset()
     prev_state = prev_state['observation']
     while True:
@@ -29,21 +31,22 @@ for ep in range(agent.total_episodes):
         agent.buffer.record((prev_state, action, reward, state['observation']))
         #episodic_reward += reward
 
-        agent.buffer.learn(ep, terminated or truncated)
+        critic_loss, actor_loss = agent.buffer.learn()
         agent.update_target(agent.target_actor.variables, agent.actor_model.variables, agent.tau)
         agent.update_target(agent.target_critic.variables, agent.critic_model.variables, agent.tau)
-
+          
         # End this episode when `done` is True
         if terminated or truncated:
+            agent.buffer.WriteBoard(critic_loss, actor_loss, ep)
             break
 
         prev_state = state['observation']
 
-    # Test Policy
+    #Test Policy
 
     if ep%10 == 0:
         ep_reward_list = []
-        agent.update=False
+        agent.write=False
         for ep_test in range(5):
             prev_state, info = env.reset()
             prev_state = prev_state['observation']
@@ -51,7 +54,7 @@ for ep in range(agent.total_episodes):
             while True:
                 tf_prev_state = tf.expand_dims(tf.convert_to_tensor(prev_state), 0)
 
-                action = agent.policy(tf_prev_state, agent.ou_noise, noise=False)
+                action = agent.policy(tf_prev_state, agent.ou_noise, noisy=False)
                 # Recieve state and reward from environment.
                 state, reward, terminated, truncated, info = env.step(action)
 

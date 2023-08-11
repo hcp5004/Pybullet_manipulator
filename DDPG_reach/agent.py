@@ -1,10 +1,3 @@
-import gym
-import tensorflow as tf
-from tensorflow.keras import layers
-import numpy as np
-import matplotlib.pyplot as plt
-import datetime
-
 """
 Title: Deep Deterministic Policy Gradient (DDPG)
 Author: [amifunny](https://github.com/amifunny)
@@ -70,7 +63,9 @@ Now, let's see how is it implemented.
 import tensorflow as tf
 from tensorflow.keras import layers
 import numpy as np
-import matplotlib.pyplot as plt
+import datetime
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 """
 To implement better exploration by the Actor network, we use noisy perturbations,
@@ -130,8 +125,8 @@ the maximum predicted value as seen by the Critic, for a given state.
 """
 
 class Buffer:
-    def __init__(self, agent, buffer_capacity=100000, batch_size=64, update=True):
-        self.udpate = update
+    def __init__(self, agent, buffer_capacity=100000, batch_size=64, write=True):
+        self.write = write
         
         # Number of "experiences" to store at max
         self.buffer_capacity = buffer_capacity
@@ -172,8 +167,6 @@ class Buffer:
         action_batch,
         reward_batch,
         next_state_batch,
-        ep,
-        done
     ):
         # Training and updating Actor & Critic networks.
         # See Pseudo Code.
@@ -184,9 +177,6 @@ class Buffer:
             )
             critic_value = self.agent.critic_model([state_batch, action_batch], training=True)
             critic_loss = tf.math.reduce_mean(tf.math.square(y - critic_value))
-        if done and self.update:
-            with self.agent.summary_writer.as_default():
-                tf.summary.scalar('critic_loss', critic_loss, step=ep)  
 
         critic_grad = tape.gradient(critic_loss, self.agent.critic_model.trainable_variables)
         self.agent.critic_optimizer.apply_gradients(
@@ -199,17 +189,16 @@ class Buffer:
             # Used `-value` as we want to maximize the value given
             # by the critic for our actions
             actor_loss = -tf.math.reduce_mean(critic_value)
-        if done and self.update:
-            with self.agent.summary_writer.as_default():
-                tf.summary.scalar('actor_loss', actor_loss, step=ep)
 
         actor_grad = tape.gradient(actor_loss, self.agent.actor_model.trainable_variables)
         self.agent.actor_optimizer.apply_gradients(
             zip(actor_grad, self.agent.actor_model.trainable_variables)
         )
 
+        return critic_loss, actor_loss
+
     # We compute the loss and update parameters
-    def learn(self, ep, done):
+    def learn(self):
         # Get sampling range
         record_range = min(self.buffer_counter, self.buffer_capacity)
         # Randomly sample indices
@@ -222,20 +211,26 @@ class Buffer:
         reward_batch = tf.cast(reward_batch, dtype=tf.float32)
         next_state_batch = tf.convert_to_tensor(self.next_state_buffer[batch_indices])
 
-        self.update(state_batch, action_batch, reward_batch, next_state_batch, ep, done)
+        return self.update(state_batch, action_batch, reward_batch, next_state_batch)
+    
+    def WriteBoard(self,critic_loss, actor_loss, ep):
+        with self.agent.summary_writer.as_default():
+            tf.summary.scalar('critic_loss', critic_loss, step=ep)  
 
-
+        with self.agent.summary_writer.as_default():
+            tf.summary.scalar('actor_loss', actor_loss, step=ep)
 
 
 class Agent:
-    def __init__(self, env, update=True):
+    def __init__(self, env, step=0, done=None, write=True):
         
-        self.update = update
+        self.write = write
         self.Init_board()
 
         self.env = env
 
-        self.num_states = env.observation_space['observation'].shape[0] #dimension
+        #self.num_states = env.observation_space.shape[0] #dimension
+        self.num_states = env.observation_space['observation'].shape[0]
         self.num_actions = env.action_space.shape[0] #dimension
 
         self.upper_bound = env.action_space.high
@@ -249,7 +244,7 @@ class Agent:
         ## Training hyperparameters
         """
         self.std_dev = 0.2
-        self.ou_noise = OUActionNoise(mean=np.zeros(1), std_deviation=float(self.std_dev) * np.ones(1))
+        self.ou_noise = OUActionNoise(mean=np.zeros(self.num_actions), std_deviation=float(self.std_dev) * np.ones(self.num_actions))
 
         self.actor_model = self.get_actor()
         self.critic_model = self.get_critic()
@@ -266,35 +261,33 @@ class Agent:
 
         # Learning rate for actor-critic models
         self.critic_lr = 0.001
-        self.actor_lr = 0.001
+        self.actor_lr = 0.0001
 
         self.critic_optimizer = tf.keras.optimizers.Adam(self.critic_lr)
         self.actor_optimizer = tf.keras.optimizers.Adam(self.actor_lr)
 
         self.total_episodes = 20000
-        # Discount factor for future rewards
+        # Discount factor for future rewards    .
         self.gamma = 0.99
         # Used to update target networks
         self.tau = 0.001
 
-        self.buffer = Buffer(self, 1000000, 256, update=self.update)
+        self.buffer = Buffer(self, 1000000, 256, write=self.write)
 
         self.actor_l2_weight = 0.01
         self.critic_l2_weight = 0.01
+
+        self.step = step
+        self.done = done
 
         """
         Now we implement our main training loop, and iterate over episodes.
         We sample actions using `policy()` and train with `learn()` at each time step,
         along with updating the Target networks at a rate `tau`.
         """
-
-        # To store reward history of each episode
-        self.ep_reward_list = []
-        # To store average reward history of last few episodes
-        self.avg_reward_list = []
     
     def Init_board(self):
-        if self.update:
+        if self.write:
             self.log_dir = "logs/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
             self.summary_writer = tf.summary.create_file_writer(self.log_dir)
         else:
@@ -338,30 +331,30 @@ class Agent:
         # Initialize weights between -3e-3 and 3-e3
         last_init = tf.random_uniform_initializer(minval=-0.0003, maxval=0.0003)
         #State as input
-        state_input = layers.Input(shape=(self.num_states))
-        state_out = layers.Dense(16, activation="relu")(state_input)
-        state_out = layers.Dense(32, activation="relu")(state_out)
+        # state_input = layers.Input(shape=(self.num_states,))
+        # state_out = layers.Dense(16, activation="relu")(state_input)
+        # state_out = layers.Dense(32, activation="relu")(state_out)
 
-        # Action as input
-        action_input = layers.Input(shape=(self.num_actions))
-        action_out = layers.Dense(32, activation="relu")(action_input)
+        # # Action as input
+        # action_input = layers.Input(shape=(self.num_actions,))
+        # action_out = layers.Dense(32, activation="relu")(action_input)
 
-        # Both are passed through seperate layer before concatenating
-        concat = layers.Concatenate()([state_out, action_out])
+        # # Both are passed through seperate layer before concatenating
+        # concat = layers.Concatenate()([state_out, action_out])
 
-        out = layers.Dense(400, activation="relu")(concat)
-        out = layers.Dense(300, activation="relu")(out)
-        outputs = layers.Dense(1,kernel_initializer=last_init)(out)
-        model = tf.keras.Model([state_input, action_input], outputs)
-        
-        # state_input = layers.Input(shape=(self.num_states))
-        # action_input = layers.Input(shape=(self.num_actions))
-        # input= layers.Concatenate()([state_input, action_input])
-        # out = layers.Dense(400, activation="relu")(input)
+        # out = layers.Dense(400, activation="relu")(concat)
         # out = layers.Dense(300, activation="relu")(out)
-        # #out = layers.Dense(256, activation="relu")(out)
         # outputs = layers.Dense(1,kernel_initializer=last_init)(out)
         # model = tf.keras.Model([state_input, action_input], outputs)
+        
+        state_input = layers.Input(shape=(self.num_states))
+        action_input = layers.Input(shape=(self.num_actions))
+        input= layers.Concatenate()([state_input, action_input])
+        out = layers.Dense(400, activation="relu")(input)
+        out = layers.Dense(300, activation="relu")(out)     
+        #out = layers.Dense(256, activation="relu")(out)
+        outputs = layers.Dense(1,kernel_initializer=last_init)(out)
+        model = tf.keras.Model([state_input, action_input], outputs)
 
         return model
 
@@ -372,12 +365,13 @@ class Agent:
     """
 
 
-    def policy(self, state, noise_object, noise = True):
-        sampled_actions = tf.squeeze(self.actor_model(state))
-        noise = noise_object()
-        # Adding noise to action
-        sampled_actions = sampled_actions.numpy() + noise
-        if not noise:
+    def policy(self, state, noise_object, noisy=True):
+        sampled_actions = tf.squeeze(self.actor_model(state, training=False))
+        if noisy:
+            noise = noise_object()
+            # Adding noise to action
+            sampled_actions = sampled_actions.numpy() + noise
+        else:
             sampled_actions = sampled_actions.numpy()
         # We make sure action is within bounds
         legal_action = np.clip(sampled_actions, self.lower_bound, self.upper_bound)
