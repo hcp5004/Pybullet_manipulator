@@ -73,7 +73,10 @@ specifically
 an **Ornstein-Uhlenbeck process** for generating noise, as described in the paper.
 It samples noise from a correlated normal distribution.
 """
-
+def normalize(x, stats):
+    if stats is None:
+        return x
+    return (x - stats.mean) / (stats.std + 1e-8)
 
 class OUActionNoise:
     def __init__(self, mean, std_deviation, theta=0.15, dt=1e-2, x_initial=None):
@@ -101,6 +104,17 @@ class OUActionNoise:
             self.x_prev = self.x_initial
         else:
             self.x_prev = np.zeros_like(self.mean)
+
+class NormalActionNoise():
+    def __init__(self, mu, sigma):
+        self.mu = mu
+        self.sigma = sigma
+
+    def __call__(self):
+        return np.random.normal(self.mu, self.sigma)
+
+
+    
 
 
 """
@@ -230,21 +244,26 @@ class Agent:
         self.env = env
 
         #self.num_states = env.observation_space.shape[0] #dimension
-        self.num_states = env.observation_space['observation'].shape[0]
+        self.num_states = env.observation_space['observation'].shape[0] + env.observation_space['desired_goal'].shape[0]
         self.num_actions = env.action_space.shape[0] #dimension
 
         self.upper_bound = env.action_space.high
         self.lower_bound = env.action_space.low
-
+        #self.observation_upper_bound = env.observation_space['observation'].high
+        #self.observation_lower_bound = env.observation_space['observation'].low
+        
         print("num_states: {}".format(self.num_states))
         print("num_actions: {}".format(self.num_actions))
         print("upper_bound: {}".format(self.upper_bound))
         print("lower_bound: {}".format(self.lower_bound))
+        #print("upper_bound: {}".format(self.observation_upper_bound))
+        #print("lower_bound: {}".format(self.observation_lower_bound))
         """
         ## Training hyperparameters
         """
         self.std_dev = 0.2
-        self.ou_noise = OUActionNoise(mean=np.zeros(self.num_actions), std_deviation=float(self.std_dev) * np.ones(self.num_actions))
+        #self.ou_noise = OUActionNoise(mean=np.zeros(self.num_actions), std_deviation=float(self.std_dev) * np.ones(self.num_actions))
+        self.ou_noise = NormalActionNoise(mu = np.zeros(self.num_actions), sigma=float(self.std_dev)*np.ones(self.num_actions))
 
         self.actor_model = self.get_actor()
         self.critic_model = self.get_critic()
@@ -260,8 +279,8 @@ class Agent:
         self.target_critic.set_weights(self.critic_model.get_weights())
 
         # Learning rate for actor-critic models
-        self.critic_lr = 0.001
-        self.actor_lr = 0.0001
+        self.critic_lr = 0.01
+        self.actor_lr = 0.01
 
         self.critic_optimizer = tf.keras.optimizers.Adam(self.critic_lr)
         self.actor_optimizer = tf.keras.optimizers.Adam(self.actor_lr)
@@ -270,12 +289,12 @@ class Agent:
         # Discount factor for future rewards    .
         self.gamma = 0.99
         # Used to update target networks
-        self.tau = 0.001
+        self.tau = 0.005 #0.001
 
         self.buffer = Buffer(self, 1000000, 256, write=self.write)
 
-        self.actor_l2_weight = 0.01
-        self.critic_l2_weight = 0.01
+        self.actor_l2_weight = 0.001
+        self.critic_l2_weight = 0.001
 
         self.step = step
         self.done = done
@@ -316,45 +335,62 @@ class Agent:
     def get_actor(self):
         # Initialize weights between -3e-3 and 3-e3
         last_init = tf.random_uniform_initializer(minval=-0.003, maxval=0.003)
-
+        
         inputs = layers.Input(shape=(self.num_states,))
-        out = layers.Dense(400, activation="relu")(inputs)
-        out = layers.Dense(300, activation="relu")(out)
-        #out = layers.Dense(256, activation="relu")(out)
+        out = layers.Dense(256, activation="relu")(inputs)
+        out = layers.Dense(256, activation="relu")(out)
+        out = layers.Dense(256, activation="relu")(out)
         outputs = layers.Dense(self.num_actions, activation="tanh", kernel_initializer=last_init)(out)
-        outputs = outputs * tf.expand_dims(tf.convert_to_tensor(self.upper_bound), axis=0)
+        outputs = outputs * self.upper_bound
         model = tf.keras.Model(inputs, outputs)
+
+        # inputs = layers.Input(shape=(self.num_states,))
+        # out = layers.BatchNormalization()(inputs)
+        # out = layers.Dense(256, activation="relu")(inputs)
+        # out = layers.BatchNormalization()(out)
+        # out = layers.Dense(256, activation="relu")(out)
+        # out = layers.BatchNormalization()(out)
+        # out = layers.Dense(256, activation="relu")(out)
+        # out = layers.BatchNormalization()(out)
+        # outputs = layers.Dense(self.num_actions, activation="tanh", kernel_initializer=last_init)(out)
+        # #outputs = outputs * tf.expand_dims(tf.convert_to_tensor(self.upper_bound), axis=0)
+        # model = tf.keras.Model(inputs, outputs)
         return model
 
 
     def get_critic(self):
         # Initialize weights between -3e-3 and 3-e3
         last_init = tf.random_uniform_initializer(minval=-0.0003, maxval=0.0003)
-        #State as input
-        # state_input = layers.Input(shape=(self.num_states,))
-        # state_out = layers.Dense(16, activation="relu")(state_input)
-        # state_out = layers.Dense(32, activation="relu")(state_out)
+        # State as input
+        state_input = layers.Input(shape=(self.num_states,))
+        state_out = layers.Dense(16, activation="relu")(state_input)
+        state_out = layers.Dense(32, activation="relu")(state_out)
 
-        # # Action as input
-        # action_input = layers.Input(shape=(self.num_actions,))
-        # action_out = layers.Dense(32, activation="relu")(action_input)
+        # Action as input
+        action_input = layers.Input(shape=(self.num_actions,))
+        action_out = layers.Dense(32, activation="relu")(action_input)
 
-        # # Both are passed through seperate layer before concatenating
-        # concat = layers.Concatenate()([state_out, action_out])
+        # Both are passed through seperate layer before concatenating
+        concat = layers.Concatenate()([state_out, action_out])
 
-        # out = layers.Dense(400, activation="relu")(concat)
-        # out = layers.Dense(300, activation="relu")(out)
-        # outputs = layers.Dense(1,kernel_initializer=last_init)(out)
-        # model = tf.keras.Model([state_input, action_input], outputs)
-        
-        state_input = layers.Input(shape=(self.num_states))
-        action_input = layers.Input(shape=(self.num_actions))
-        input= layers.Concatenate()([state_input, action_input])
-        out = layers.Dense(400, activation="relu")(input)
-        out = layers.Dense(300, activation="relu")(out)     
-        #out = layers.Dense(256, activation="relu")(out)
+        out = layers.Dense(256, activation="relu")(concat)
+        out = layers.Dense(256, activation="relu")(out)
+        out = layers.Dense(256, activation="relu")(out)
         outputs = layers.Dense(1,kernel_initializer=last_init)(out)
         model = tf.keras.Model([state_input, action_input], outputs)
+        
+        # state_input = layers.Input(shape=(self.num_states))
+        # state_input_out = tf.keras.layers.BatchNormalization()(state_input)
+        # action_input = layers.Input(shape=(self.num_actions))
+        # input= layers.Concatenate()([state_input_out, action_input])
+        # out = layers.Dense(256, activation="relu")(input)
+        # out = tf.keras.layers.BatchNormalization()(out)
+        # out = layers.Dense(256, activation="relu")(out)   
+        # out = tf.keras.layers.BatchNormalization()(out)  
+        # out = layers.Dense(256, activation="relu")(out)
+        # out = tf.keras.layers.BatchNormalization()(out)
+        # outputs = layers.Dense(1, kernel_initializer=last_init)(out)
+        # model = tf.keras.Model([state_input, action_input], outputs)
 
         return model
 
@@ -370,6 +406,11 @@ class Agent:
         if noisy:
             noise = noise_object()
             # Adding noise to action
+            # exploration = np.random.rand()
+            # if exploration < 0.3:
+            #     sampled_actions = np.random.uniform(low=self.lower_bound, high=self.upper_bound, size=self.num_actions)
+            # else:
+            assert noise.shape == sampled_actions.shape
             sampled_actions = sampled_actions.numpy() + noise
         else:
             sampled_actions = sampled_actions.numpy()
