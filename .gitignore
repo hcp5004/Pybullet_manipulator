@@ -1,2 +1,4 @@
 DDPG_reach/logs/
 DDPG_reach/models/
+DDPG_reach/__pycache__/
+panda_gym/__pycache__/

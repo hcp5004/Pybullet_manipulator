@@ -38,7 +38,7 @@ for ep in range(agent.total_episodes):
         agent.update_target(agent.target_critic.variables, agent.critic_model.variables, agent.tau)
           
         # End this episode when `done` is True
-        if terminated or truncated:
+        if truncated:
             agent.buffer.WriteBoard(critic_loss, actor_loss, ep)
             break
 
@@ -65,7 +65,7 @@ for ep in range(agent.total_episodes):
                 episodic_reward += reward
 
                 # End this episode when `done` is True
-                if terminated or truncated:
+                if truncated:
                     break
 
                 prev_state = state

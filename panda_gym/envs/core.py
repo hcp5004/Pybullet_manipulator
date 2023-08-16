@@ -227,7 +227,7 @@ class RobotTaskEnv(gym.Env):
         assert robot.sim == task.sim, "The robot and the task must belong to the same simulation."
         self.sim = robot.sim
         self.render_mode = self.sim.render_mode
-        self.metadata["render_fps"] = 1 / self.sim.dt
+        self.metadata["render_fps"] = 1 / self.sim.dt 
         self.robot = robot
         self.task = task
         observation, _ = self.reset()  # required for init; seed can be changed later

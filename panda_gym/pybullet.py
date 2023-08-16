@@ -25,7 +25,7 @@ class PyBullet:
     def __init__(
         self,
         render_mode: str = "rgb_array",
-        n_substeps: int = 20,
+        n_substeps: int = 20*20,
         background_color: Optional[np.ndarray] = None,
         renderer: str = "Tiny",
     ) -> None:
@@ -51,7 +51,8 @@ class PyBullet:
         self.physics_client.configureDebugVisualizer(p.COV_ENABLE_MOUSE_PICKING, 0)
 
         self.n_substeps = n_substeps
-        self.timestep = 1.0 / 500
+        self.timestep = 1.0 / (500*20)
+        #self.physics_client.setRealTimeSimulation(1)
         self.physics_client.setTimeStep(self.timestep)
         self.physics_client.resetSimulation()
         self.physics_client.setAdditionalSearchPath(pybullet_data.getDataPath())

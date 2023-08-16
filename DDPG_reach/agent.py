@@ -285,7 +285,7 @@ class Agent:
         self.critic_optimizer = tf.keras.optimizers.Adam(self.critic_lr)
         self.actor_optimizer = tf.keras.optimizers.Adam(self.actor_lr)
 
-        self.total_episodes = 20000
+        self.total_episodes = 1000#20000
         # Discount factor for future rewards    .
         self.gamma = 0.99
         # Used to update target networks
